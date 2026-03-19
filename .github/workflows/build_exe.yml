@@ -1,0 +1,47 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Create placeholder .env
+        shell: pwsh
+        run: |
+          Set-Content -Path ".env" -Value "DHAN_CLIENT_ID=`nDHAN_ACCESS_TOKEN=`nDHAN_PIN=`nDHAN_TOTP_SECRET="
+
+      - name: Build EXE
+        shell: pwsh
+        run: |
+          pyinstaller orb_strategy.spec --clean --noconfirm
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ORB_5Min_Strategy_Windows
+          path: dist/ORB_5Min_Strategy.exe
+          retention-days: 30
