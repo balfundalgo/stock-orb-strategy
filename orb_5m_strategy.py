@@ -3,7 +3,7 @@
 orb_5m_strategy.py
 ──────────────────────────────────────────────────────────────────
 5-Minute Opening Range Breakout (ORB)
-Dhan WebSocket  ·  NSE EQ  ·  131 Stocks (all above ₹200)
+Dhan WebSocket  ·  NSE EQ  ·  288 Stocks (all above ₹200)
 
 Features
 ────────
@@ -101,11 +101,12 @@ ST_SKIPPED  = "SKIPPED"
 
 
 # ═══════════════════════════════════════════════════════════════
-# WATCHLIST  — 131 stocks all above ₹200
+# WATCHLIST  — 288 stocks all above ₹200
 # (removed 42 stocks that were trading below ₹200)
 # ═══════════════════════════════════════════════════════════════
 
 WATCHLIST: List[str] = [
+    # ── Original list (above ₹200) ───────────────────────────
     "WIPRO","RITES","FSL","FIRSTCRY","ACMESOLAR","ANGELONE","ETERNAL",
     "APTUS","JIOFIN","CAMPUS","JYOTHYLAB","SCI","NLCINDIA","CROMPTON",
     "SONATSOFTW","BLS","GPIL","CUB","ITI","BHEL","NYKAA","REDINGTON",
@@ -125,6 +126,31 @@ WATCHLIST: List[str] = [
     "JSWENERGY","IIFL","PATANJALI","AKUMS","BALRAMCHIN","MINDACORP",
     "SONACOMS","LICHSGFIN","JBMA","HEG","ELGIEQUIP","KEC","VTL","GMDCLTD",
     "MAHSEAMLES","IRCTC","SARDAEN","RKFORGE","ZENSARTECH","JUBLINGREA",
+    # ── New list (imp_stocks.xls) ─────────────────────────────
+    "AEGISLOG","INDHOTEL","UPL","HDFCLIFE","CHOICEIN","TITAGARH","INTELLECT",
+    "HBLENGINE","VENTIVE","BRIGADE","KIMS","CAMS","KPITTECH","TATACHEM",
+    "CENTURYPLY","MOTILALOFS","ATHERENERG","APLLTD","SBICARD","BATAINDIA",
+    "VEDL","CGPOWER","JSL","CLEAN","SYRMA","MARICO","KSB","JYOTICNC",
+    "CHALET","PNBHOUSING","SHYAMMETL","CARBORUNIV","PREMIERENE","ARE&M",
+    "LICI","JUBLPHARMA","EIDPARRY","KPRMILL","WELCORP","HDFCBANK",
+    "SUNDRMFAST","SIGNATURE","ADANIGREEN","ACE","NAM-INDIA","ASAHIINDIA",
+    "CANFINHOME","INDUSINDBK","LODHA","FORTIS","FACT","FINCABLES","GODREJIND",
+    "WHIRLPOOL","BAJFINANCE","OLECTRA","CHENNPETRO","INDIANB","AUBANK",
+    "ZYDUSLIFE","CYIENT","KFINTECH","NAUKRI","KAJARIACER","HINDALCO",
+    "VIJAYA","UTIAMC","DCMSHRIRAM","MAPMYINDIA","ADANIENSOL","RAMCOCEM",
+    "DEEPAKFERT","ABSLAMC","SAILIFE","NATCOPHARM","PAYTM","PVRINOX",
+    "SHRIRAMFIN","MAXHEALTH","LAURUSLABS","CCL","360ONE","MGL","HOMEFIRST",
+    "TATACONSUM","UNOMINDA","SBIN","GODREJCP","MEDANTA","TECHNOE","COFORGE",
+    "KPIL","CONCORDBIO","JSWSTEEL","ABREL","LLOYDSME","JINDALSTEL",
+    "INOXINDIA","CREDITACC","RAINBOW","TBOTEK","AAVAS","NUVAMA","CDSL",
+    "NESTLEIND","AXISBANK","PRESTIGE","INFY","ICICIBANK","AUROPHARMA",
+    "WOCKPHARMA","ALKYLAMINE","DRREDDY","CIPLA","POLYMED","TECHM","ERIS",
+    "HCLTECH","SOBHA","BDL","HAVELLS","IKS","UNITDSPR","RELIANCE","PIDILITIND",
+    "LALPATHLAB","ZENTEC","ADANIPORTS","AFFLE","RRKABEL","GESHIP","TORNTPOWER",
+    "KIRLOSENG","ACC","COCHINSHIP","POLICYBZR","VOLTAS","ONESOURCE","TATACOMM",
+    "OBEROIRLTY","DEEPAKNTR","GRAVITA","IPCALAB","BHARTIHEXA","CHOLAFIN",
+    "EMCURE","CHOLAHLDNG","BBTC","PHOENIXLTD","KIRLOSBROS","BEML","UBL",
+    "CAPLIPOINT","MFSL","ASTRAL","BHARATFORG","SUNPHARMA",
 ]
 
 
@@ -981,7 +1007,7 @@ class LoadingScreen:
             client_id = cfg["client_id"]
 
             self.root.after(0, lambda: self._set(
-                "[ 2/4 ]  Resolving 131 NSE EQ security IDs...",
+                "[ 2/4 ]  Resolving 288 NSE EQ security IDs...",
                 "Downloading Dhan instrument master CSV"))
             resolved = resolve_instruments(WATCHLIST)
             found    = sum(1 for v in resolved.values() if v)
@@ -1002,7 +1028,7 @@ class LoadingScreen:
             if after_first and before_mktc:
                 self.root.after(0, lambda: self._set(
                     "[ 4/4 ]  Fetching first 5-min candle (09:15) via REST...",
-                    "Seeding High & Low for all 131 stocks"))
+                    "Seeding High & Low for all 288 stocks"))
                 seeded = fetch_first_candle_rest(
                     engine, token, client_id,
                     log_cb=self._loading_log)
@@ -1037,7 +1063,7 @@ class ORBApp:
         self.engine = engine
         engine.log_cb = self._append_log
 
-        root.title("ORB 5-Min  ·  Dhan NSE EQ  ·  131 Stocks")
+        root.title("ORB 5-Min  ·  Dhan NSE EQ  ·  288 Stocks")
         root.geometry("1460x880")
         root.minsize(1200, 680)
         root.configure(bg=BG)
@@ -1081,7 +1107,7 @@ class ORBApp:
         tk.Label(top, text="ORB 5-MIN STRATEGY",
                  bg=PANEL, fg=CYAN, font=("Courier", 15, "bold"),
                  ).pack(side="left", padx=18, pady=8)
-        tk.Label(top, text="NSE EQ  ·  131 Stocks",
+        tk.Label(top, text="NSE EQ  ·  288 Stocks",
                  bg=PANEL, fg=DIM, font=("Courier", 10)).pack(side="left", padx=4)
         self._lbl_clock = tk.Label(top, text="--:--:--", bg=PANEL, fg=FG,
                                    font=("Courier", 13, "bold"))
