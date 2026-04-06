@@ -666,7 +666,7 @@ class StrategyEngine:
             return
         # Rate-limit: serialise all order calls, min 0.4s apart (avoids 429)
         with self._order_lock:
-            gap = 0.4 - (time.time() - self._last_order_ts)
+            gap = 0.3 - (time.time() - self._last_order_ts)
             if gap > 0:
                 time.sleep(gap)
             self._last_order_ts = time.time()
@@ -686,14 +686,20 @@ class StrategyEngine:
         else:
             self._log(f"{mode} ORDER FAILED  {side}  {stock.symbol}: {order_id}")
 
-    def _squareoff_stock(self, stock: StockState):
+    def _place_sq_order(self, stock: StockState) -> bool:
+        """
+        Place a single squareoff order with rate limiting.
+        Does NOT mark the stock as squared — caller decides.
+        Returns True on success.
+        """
         if stock.state not in (ST_LONG, ST_SHORT):
-            return
+            return True   # nothing to do
         exit_px = stock.ltp or stock.entry_price or 0.0
         sq_side = "SELL" if stock.state == ST_LONG else "BUY"
-        # Rate-limit: serialise all order calls
+        mode    = "[PAPER]" if self.paper_mode else "[LIVE] "
+
         with self._order_lock:
-            gap = 0.4 - (time.time() - self._last_order_ts)
+            gap = 0.3 - (time.time() - self._last_order_ts)
             if gap > 0:
                 time.sleep(gap)
             self._last_order_ts = time.time()
@@ -701,35 +707,83 @@ class StrategyEngine:
                 stock.security_id, sq_side, stock.trade_qty,
                 self.access_token, self.client_id, self.paper_mode,
             )
-        mode = "[PAPER]" if self.paper_mode else "[LIVE] "
+
         if ok:
             stock.record_squareoff(exit_px)
             self._log(
                 f"{mode} SQ-OFF {sq_side}  {stock.trade_qty}×{stock.symbol:<14}  "
                 f"@ ₹{exit_px:.2f}   PnL=₹{stock.realized_pnl:+.2f}  ordId={oid}"
             )
+            return True
         else:
             self._log(f"{mode} SQ-OFF FAILED  {sq_side}  {stock.symbol}: {oid}")
+            return False
+
+    def _squareoff_stock(self, stock: StockState):
+        """Single stock squareoff with up to 3 retries."""
+        for attempt in range(1, 4):
+            if stock.state not in (ST_LONG, ST_SHORT):
+                return
+            ok = self._place_sq_order(stock)
+            if ok:
+                return
+            if attempt < 3:
+                wait = attempt * 1.5   # 1.5s, 3s
+                self._log(f"  ↻ Retry {attempt}/3 for {stock.symbol} in {wait:.0f}s...")
+                time.sleep(wait)
+        self._log(f"  ❌ {stock.symbol} squareoff failed after 3 attempts — "
+                  f"please close manually in Dhan.")
 
     def squareoff_one(self, symbol: str):
         stock = self.sym_map.get(symbol)
         if stock:
-            self._squareoff_stock(stock)
+            threading.Thread(target=self._squareoff_stock,
+                             args=(stock,), daemon=True).start()
 
     def global_squareoff(self):
+        """
+        Close ALL active positions SEQUENTIALLY with rate limiting.
+        Retries each failed order up to 3 times before moving on.
+        This is intentionally single-threaded to avoid 429 floods.
+        """
         active = [s for s in self.stocks.values()
                   if s.state in (ST_LONG, ST_SHORT)]
         if not active:
             self._log("Global Sq-Off: no active positions.")
             return
-        self._log(f"Global Sq-Off: closing {len(active)} position(s) "
-                  f"({'LIVE' if not self.paper_mode else 'PAPER'})...")
-        threads = [threading.Thread(target=self._squareoff_stock,
-                                    args=(s,), daemon=True) for s in active]
-        for t in threads: t.start()
-        for t in threads: t.join(timeout=10)
-        total = sum(s.realized_pnl for s in active)
-        self._log(f"Global Sq-Off done — batch P&L: ₹{total:+.2f}")
+
+        mode = "LIVE" if not self.paper_mode else "PAPER"
+        self._log(f"Global Sq-Off [{mode}]: closing {len(active)} position(s) "
+                  f"sequentially (~{len(active)*0.6:.0f}s)...")
+
+        success = 0
+        failed_syms = []
+
+        for stock in active:
+            ok = False
+            for attempt in range(1, 4):
+                if stock.state not in (ST_LONG, ST_SHORT):
+                    ok = True
+                    break
+                ok = self._place_sq_order(stock)
+                if ok:
+                    success += 1
+                    break
+                if attempt < 3:
+                    wait = attempt * 1.5
+                    self._log(f"  ↻ Retry {attempt}/3 for {stock.symbol} in {wait:.0f}s...")
+                    time.sleep(wait)
+
+            if not ok:
+                failed_syms.append(stock.symbol)
+
+        total = sum(s.realized_pnl for s in active if s.state == ST_SQUARED)
+        self._log(f"Global Sq-Off done — "
+                  f"closed {success}/{len(active)}  "
+                  f"P&L: ₹{total:+.2f}")
+        if failed_syms:
+            self._log(f"  ❌ Still open ({len(failed_syms)}) — close manually: "
+                      + ", ".join(failed_syms))
 
     def toggle_skip(self, symbol: str) -> bool:
         """Toggle skip state for a symbol. Returns new skip state (True=skipped)."""
