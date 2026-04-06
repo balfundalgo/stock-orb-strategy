@@ -556,6 +556,9 @@ class StrategyEngine:
         self.ws_error:    Optional[str]   = None
         self.ticker_count = 0
         self._entry_lock   = threading.Lock()
+        # Order rate limiter — max 1 order per 0.4s to avoid Dhan 429 errors
+        self._order_lock   = threading.Lock()
+        self._last_order_ts: float = 0.0
         self.log_cb = None
 
     def set_instruments(self, resolved: Dict[str, Optional[str]]):
@@ -661,11 +664,17 @@ class StrategyEngine:
     def _do_entry(self, stock: StockState, side: str, ltp: float, qty: int):
         if stock.state != ST_WATCHING:
             return
-        ok, order_id = place_order(
-            stock.security_id, side, qty,
-            self.access_token, self.client_id,
-            self.paper_mode,
-        )
+        # Rate-limit: serialise all order calls, min 0.4s apart (avoids 429)
+        with self._order_lock:
+            gap = 0.4 - (time.time() - self._last_order_ts)
+            if gap > 0:
+                time.sleep(gap)
+            self._last_order_ts = time.time()
+            ok, order_id = place_order(
+                stock.security_id, side, qty,
+                self.access_token, self.client_id,
+                self.paper_mode,
+            )
         mode = "[PAPER]" if self.paper_mode else "[LIVE] "
         if ok:
             stock.record_entry(side, ltp, qty, order_id)
@@ -682,10 +691,16 @@ class StrategyEngine:
             return
         exit_px = stock.ltp or stock.entry_price or 0.0
         sq_side = "SELL" if stock.state == ST_LONG else "BUY"
-        ok, oid = place_order(
-            stock.security_id, sq_side, stock.trade_qty,
-            self.access_token, self.client_id, self.paper_mode,
-        )
+        # Rate-limit: serialise all order calls
+        with self._order_lock:
+            gap = 0.4 - (time.time() - self._last_order_ts)
+            if gap > 0:
+                time.sleep(gap)
+            self._last_order_ts = time.time()
+            ok, oid = place_order(
+                stock.security_id, sq_side, stock.trade_qty,
+                self.access_token, self.client_id, self.paper_mode,
+            )
         mode = "[PAPER]" if self.paper_mode else "[LIVE] "
         if ok:
             stock.record_squareoff(exit_px)
