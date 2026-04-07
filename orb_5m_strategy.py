@@ -26,52 +26,53 @@ from typing import Dict, List, Optional, Tuple, Any
 import requests
 import pandas as pd
 import websocket
-from dotenv import load_dotenv, set_key
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(
-    sys.executable if getattr(sys, "frozen", False) else __file__
-)))
-from dhan_token_manager import get_fresh_token, load_config
 
 
 # ═══════════════════════════════════════════════════════════════
-# ENV / APP DIR
+# TOKEN READER
+# Reads token saved by Dhan Token Generator (token_generator.py)
+# Primary  : C:\balfund_shared\dhan_token.json
+# Fallback : http://localhost:5555/token
 # ═══════════════════════════════════════════════════════════════
 
-def get_app_dir() -> Path:
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent
-    return Path(__file__).parent
+TOKEN_FILE       = r"C:alfund_shared\dhan_token.json"
+TOKEN_SERVER_URL = "http://localhost:5555/token"
 
-def get_env_path() -> Path:
-    return get_app_dir() / ".env"
 
-def credentials_complete() -> bool:
-    env = get_env_path()
-    if not env.exists():
-        return False
-    load_dotenv(env, override=True)
-    return all([
-        os.getenv("DHAN_CLIENT_ID",   "").strip(),
-        os.getenv("DHAN_PIN",         "").strip(),
-        os.getenv("DHAN_TOTP_SECRET", "").strip(),
-    ])
-
-def write_env(client_id: str, pin: str, totp_secret: str):
-    env = get_env_path()
-    if not env.exists():
-        env.write_text(
-            "DHAN_CLIENT_ID=\nDHAN_PIN=\n"
-            "DHAN_TOTP_SECRET=\nDHAN_ACCESS_TOKEN=\nDHAN_TOKEN_EXPIRY=\n"
-        )
-    set_key(str(env), "DHAN_CLIENT_ID",   client_id.strip())
-    set_key(str(env), "DHAN_PIN",         pin.strip())
-    set_key(str(env), "DHAN_TOTP_SECRET", totp_secret.strip())
+def load_token() -> dict:
+    """
+    Returns {"client_id": ..., "access_token": ...} or raises RuntimeError.
+    Tries shared JSON file first, then localhost HTTP endpoint.
+    """
+    # ── Try shared file ───────────────────────────────────────
     try:
-        import dhan_token_manager as _dtm
-        _dtm.ENV_FILE = env
-    except Exception:
-        pass
+        with open(TOKEN_FILE, "r") as f:
+            data = json.load(f)
+        token = data.get("access_token", "").strip()
+        cid   = data.get("client_id",    "").strip()
+        if token and cid:
+            print(f"  Token loaded from file (client: {data.get('client_name', '')})")
+            return {"client_id": cid, "access_token": token}
+    except Exception as e:
+        print(f"  Token file not found: {e}")
+
+    # ── Try localhost HTTP ────────────────────────────────────
+    try:
+        r     = requests.get(TOKEN_SERVER_URL, timeout=5)
+        data  = r.json()
+        token = data.get("access_token", "").strip()
+        cid   = data.get("client_id",    "").strip()
+        if token and cid:
+            print(f"  Token loaded from HTTP (client: {data.get('client_name', '')})")
+            return {"client_id": cid, "access_token": token}
+    except Exception as e:
+        print(f"  Token HTTP not available: {e}")
+
+    raise RuntimeError(
+        "No Dhan token found.\n\n"
+        "Please run the Dhan Token Generator first to generate\n"
+        "and save your access token, then launch this strategy."
+    )
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -849,128 +850,35 @@ STATE_LBL = {
 # ═══════════════════════════════════════════════════════════════
 
 class SetupScreen:
+    """Shown only if token file is missing — directs user to run token generator."""
     def __init__(self, root: tk.Tk, on_complete):
-        self.root = root
-        self.on_complete = on_complete
-        root.title("ORB 5-Min Strategy  ·  Setup")
-        root.geometry("520x560")
+        root.title("ORB 5-Min Strategy")
+        root.geometry("480x260")
         root.resizable(False, False)
         root.configure(bg=BG)
         root.protocol("WM_DELETE_WINDOW", root.destroy)
-        self._build()
 
-    def _build(self):
-        root = self.root
-        hdr = tk.Frame(root, bg=PANEL, height=70)
-        hdr.pack(fill="x"); hdr.pack_propagate(False)
-        tk.Label(hdr, text="ORB 5-MIN STRATEGY",
-                 bg=PANEL, fg=CYAN, font=("Courier", 17, "bold")).pack(pady=(14, 2))
-        tk.Label(hdr, text="First-time Setup  ·  Enter Your Dhan Credentials",
-                 bg=PANEL, fg=DIM, font=("Courier", 10)).pack()
+        tk.Label(root, text="ORB 5-MIN STRATEGY",
+                 bg=BG, fg=CYAN, font=("Courier", 16, "bold")).pack(pady=(36, 8))
 
-        card = tk.Frame(root, bg=CARD, padx=36, pady=28)
-        card.pack(fill="both", expand=True, padx=28, pady=20)
+        tk.Label(root,
+                 text="⚠  Dhan access token not found.",
+                 bg=BG, fg=RED, font=("Courier", 12, "bold")).pack(pady=(0, 6))
 
-        def _lbl(t): tk.Label(card, text=t, bg=CARD, fg=DIM,
-                               font=("Courier", 10), anchor="w").pack(fill="x", pady=(12, 2))
-        def _entry(show=""):
-            e = tk.Entry(card, bg=BG, fg=WHITE, insertbackground=WHITE,
-                         font=("Courier", 12), relief="flat", bd=0, show=show,
-                         highlightbackground=BORDER, highlightthickness=1,
-                         highlightcolor=CYAN)
-            e.pack(fill="x", ipady=7)
-            return e
+        tk.Label(root,
+                 text="Please run the Dhan Token Generator first\n"
+                      "to generate and save your access token.\n\n"
+                      f"Expected location:\n{TOKEN_FILE}",
+                 bg=BG, fg=DIM, font=("Courier", 10), justify="center").pack(pady=(0, 16))
 
-        _lbl("DHAN CLIENT ID  (10-digit number from web.dhan.co → Profile)")
-        self._cid = _entry()
-
-        _lbl("TRADING PIN  (4 to 6-digit PIN)")
-        pf = tk.Frame(card, bg=CARD); pf.pack(fill="x")
-        self._pin = tk.Entry(pf, bg=BG, fg=WHITE, insertbackground=WHITE,
-                             font=("Courier", 12), relief="flat", bd=0, show="●",
-                             highlightbackground=BORDER, highlightthickness=1,
-                             highlightcolor=CYAN)
-        self._pin.pack(side="left", fill="x", expand=True, ipady=7)
-        self._pin_vis = False
-        tk.Button(pf, text="👁", bg=BG, fg=DIM, relief="flat", bd=0,
-                  cursor="hand2", font=("Courier", 11),
-                  command=self._toggle_pin).pack(side="right", padx=(4, 0))
-
-        _lbl("TOTP SECRET  (from web.dhan.co → Profile → API Access → Enable TOTP)")
-        tf = tk.Frame(card, bg=CARD); tf.pack(fill="x")
-        self._totp = tk.Entry(tf, bg=BG, fg=WHITE, insertbackground=WHITE,
-                              font=("Courier", 11), relief="flat", bd=0, show="●",
-                              highlightbackground=BORDER, highlightthickness=1,
-                              highlightcolor=CYAN)
-        self._totp.pack(side="left", fill="x", expand=True, ipady=7)
-        self._totp_vis = False
-        tk.Button(tf, text="👁", bg=BG, fg=DIM, relief="flat", bd=0,
-                  cursor="hand2", font=("Courier", 11),
-                  command=self._toggle_totp).pack(side="right", padx=(4, 0))
-
-        tk.Label(card,
-                 text="Credentials saved in .env next to the app.\n"
-                      "Never shared. Only used to generate your Dhan token.",
-                 bg=CARD, fg=DIM, font=("Courier", 9), justify="left",
-                 ).pack(anchor="w", pady=(18, 0))
-        self._err_lbl = tk.Label(card, text="", bg=CARD, fg=RED,
-                                  font=("Courier", 10))
-        self._err_lbl.pack(pady=(6, 0))
-
-        btn_row = tk.Frame(root, bg=BG)
-        btn_row.pack(fill="x", padx=28, pady=(0, 20))
-        self._save_btn = tk.Button(
-            btn_row, text="Save & Launch  →",
-            bg=CYAN, fg=BG, font=("Courier", 13, "bold"),
-            relief="flat", bd=0, cursor="hand2",
-            activebackground="#0891B2", activeforeground=BG,
-            pady=12, command=self._on_save)
-        self._save_btn.pack(fill="x")
-
-        env = get_env_path()
-        if env.exists():
-            load_dotenv(env, override=True)
-            self._cid.insert(0,  os.getenv("DHAN_CLIENT_ID",   ""))
-            self._pin.insert(0,  os.getenv("DHAN_PIN",         ""))
-            self._totp.insert(0, os.getenv("DHAN_TOTP_SECRET", ""))
-
-    def _toggle_pin(self):
-        self._pin_vis = not self._pin_vis
-        self._pin.configure(show="" if self._pin_vis else "●")
-
-    def _toggle_totp(self):
-        self._totp_vis = not self._totp_vis
-        self._totp.configure(show="" if self._totp_vis else "●")
-
-    def _on_save(self):
-        cid = self._cid.get().strip()
-        pin = self._pin.get().strip()
-        totp = self._totp.get().strip()
-        if not cid or not cid.isdigit():
-            self._err("Client ID must be numeric."); return
-        if not pin or not pin.isdigit() or not (4 <= len(pin) <= 6):
-            self._err("Trading PIN must be 4–6 digits."); return
-        if not totp or len(totp) < 16:
-            self._err("TOTP Secret too short — check web.dhan.co."); return
-        self._save_btn.configure(text="Saving...", state="disabled", bg=BORDER)
-        self._err_lbl.configure(text="")
-        self.root.update()
-        try:
-            write_env(cid, pin, totp)
-        except Exception as e:
-            self._save_btn.configure(text="Save & Launch  →",
-                                     state="normal", bg=CYAN)
-            self._err(f"Could not write .env: {e}"); return
-        self.root.destroy()
-        self.on_complete()
-
-    def _err(self, msg):
-        self._err_lbl.configure(text=f"⚠  {msg}")
+        tk.Button(root, text="Retry",
+                  bg=CYAN, fg=BG, font=("Courier", 12, "bold"),
+                  relief="flat", bd=0, cursor="hand2", pady=8,
+                  activebackground="#0891B2", activeforeground=BG,
+                  command=lambda: [root.destroy(), on_complete()]
+                  ).pack(fill="x", padx=40)
 
 
-# ═══════════════════════════════════════════════════════════════
-# LOADING SCREEN
-# ═══════════════════════════════════════════════════════════════
 
 class LoadingScreen:
     def __init__(self, root: tk.Tk, on_ready, on_error):
@@ -1023,16 +931,12 @@ class LoadingScreen:
     def _bg_init(self):
         try:
             self.root.after(0, lambda: self._set(
-                "[ 1/4 ]  Generating access token...",
-                "Connecting to Dhan authentication server"))
+                "[ 1/4 ]  Reading access token...",
+                f"Looking for token in {TOKEN_FILE}"))
 
-            import dhan_token_manager as _dtm
-            _dtm.ENV_FILE = get_env_path()
-            load_dotenv(get_env_path(), override=True)
-
-            cfg       = load_config()
-            token     = get_fresh_token(cfg)
-            client_id = cfg["client_id"]
+            tok_data  = load_token()
+            token     = tok_data["access_token"]
+            client_id = tok_data["client_id"]
 
             self.root.after(0, lambda: self._set(
                 "[ 2/4 ]  Resolving 21 NSE EQ security IDs...",
@@ -1428,7 +1332,21 @@ def launch():
         SetupScreen(sr, after_setup)
         sr.mainloop()
 
-    root.after(0, open_setup if not credentials_complete() else open_loading)
+    # Check if token file exists — if not, show setup screen with instructions
+    def _token_available() -> bool:
+        try:
+            with open(TOKEN_FILE) as f:
+                d = json.load(f)
+            return bool(d.get("access_token", "").strip())
+        except Exception:
+            pass
+        try:
+            r = requests.get(TOKEN_SERVER_URL, timeout=3)
+            return bool(r.json().get("access_token", "").strip())
+        except Exception:
+            return False
+
+    root.after(0, open_setup if not _token_available() else open_loading)
     root.mainloop()
 
 
